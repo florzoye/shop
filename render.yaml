@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: telegram-shop-bot
+    env: docker
+    region: frankfurt
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: DATABASE_PATH
+        value: /app/data/products.db
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
