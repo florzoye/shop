@@ -12,6 +12,35 @@ from db.crud import ProductsSQL
 router = Router()
 logger = setup_logger("catalog")
 
+def create_brands_keyboard(brands) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"🏷 {brand.name}",
+            callback_data=f"catalog_brand:{brand.id}"
+        )]
+        for brand in brands
+    ]
+
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="catalog_categories")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def create_flavors_keyboard(products) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"{p.flavor} ({p.quantity} шт)",
+            callback_data=f"catalog_product:{p.id}"
+        )]
+        for p in products if p.quantity > 0
+    ]
+
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="catalog_back_to_brands")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def create_main_catalog_keyboard() -> InlineKeyboardMarkup:
     """Главная клавиатура каталога"""
@@ -66,13 +95,13 @@ def format_product_info(product, show_full: bool = True) -> str:
     
     if show_full:
         return (
-            f"{stock_emoji} <b>{product.title}</b>\n"
-            f"├ Категория: {product.category.value}\n"
+            f"{stock_emoji} <b>{product.brand_name} - {product.flavor}</b>\n"
+            f"├ Категория: {product.category.value if product.category else 'N/A'}\n"
             f"├ Цена: <b>{product.price}₽</b>\n"
             f"└ Остаток: {stock_text}"
         )
     else:
-        return f"{stock_emoji} <b>{product.title}</b> — {product.price}₽ ({stock_text})"
+        return f"{stock_emoji} <b>{product.brand_name} - {product.flavor}</b> — {product.price}₽ ({stock_text})"
 
 
 def create_pagination_keyboard(
@@ -194,34 +223,84 @@ async def show_in_stock(
     await show_products_page(callback.message, products, 1, "Товары в наличии")
     await callback.answer()
 
+from db.crud import BrandsSQL
 
 @router.callback_query(F.data.startswith("catalog_cat:"))
-async def show_category_products(
+async def show_category_brands(
     callback: CallbackQuery,
-    products_db: ProductsSQL,
+    brands_db: BrandsSQL,
     state: FSMContext
 ):
-    """Показать товары категории"""
     category = callback.data.split(":")[1]
-    products = await products_db.get_by_category(category)
-    
-    if not products:
-        await callback.answer(
-            f"📭 В категории '{category}' нет товаров",
+
+    brands = await brands_db.get_brands_by_category(category)
+
+    if not brands:
+        return await callback.answer(
+            "📭 В этой категории нет брендов",
             show_alert=True
         )
-        return
-    
+
     await state.update_data(
-        current_products=products,
-        view_mode=f"category:{category}"
+        selected_category=category
     )
-    
-    await show_products_page(
-        callback.message,
-        products,
-        1,
-        f"Категория: {category.capitalize()}"
+
+    await callback.message.edit_text(
+        f"🏷 <b>Бренды в категории:</b>",
+        reply_markup=create_brands_keyboard(brands),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("catalog_brand:"))
+async def show_brand_flavors(
+    callback: CallbackQuery,
+    products_db: ProductsSQL,
+    brands_db: BrandsSQL,
+    state: FSMContext
+):
+    brand_id = int(callback.data.split(":")[1])
+
+    products = await products_db.get_products_by_brand(brand_id)
+    products = [p for p in products if p.quantity > 0]
+
+    if not products:
+        return await callback.answer(
+            "📭 У этого бренда нет товаров в наличии",
+            show_alert=True
+        )
+
+    brand = await brands_db.get_brand_by_id(brand_id)
+
+    await state.update_data(
+        selected_brand_id=brand_id
+    )
+
+    await callback.message.edit_text(
+        f"🧾 <b>{brand.name}</b>\nВыберите вкус:",
+        reply_markup=create_flavors_keyboard(products),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "catalog_back_to_brands")
+async def back_to_brands(
+    callback: CallbackQuery,
+    brands_db: BrandsSQL,
+    state: FSMContext
+):
+    data = await state.get_data()
+    category = data.get("selected_category")
+
+    if not category:
+        return await callback.answer()
+
+    brands = await brands_db.get_brands_by_category(category)
+
+    await callback.message.edit_text(
+        "🏷 <b>Бренды:</b>",
+        reply_markup=create_brands_keyboard(brands),
+        parse_mode="HTML"
     )
     await callback.answer()
 

@@ -12,11 +12,12 @@ class DatabaseMiddleware(BaseMiddleware):
         event: Message | CallbackQuery,
         data: Dict[str, Any]
     ) -> Any:
-        # Получаем БД из диспетчера
+        brands_db = data.get("brands_db")
         products_db = data.get("products_db")
         sales_db = data.get("sales_db")
         
-        # Передаём в хендлер
+        if brands_db:
+            data["brands_db"] = brands_db
         if products_db:
             data["products_db"] = products_db
         if sales_db:
