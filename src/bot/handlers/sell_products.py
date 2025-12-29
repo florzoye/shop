@@ -9,7 +9,7 @@ from src.bot.config import bot_config
 from src.bot.models.base import ProductCategory
 from src.bot.utils.logger import setup_logger
 
-from db.crud import ProductsSQL, SalesSQL
+from db.crud import BrandsSQL, ProductsSQL, SalesSQL
 
 
 router = Router()
@@ -18,10 +18,28 @@ logger = setup_logger("sell_product")
 
 class SellProductStates(StatesGroup):
     selecting_category = State()
+    selecting_brand = State()
     selecting_product = State()
     entering_quantity = State()
     entering_price = State()
 
+def create_brands_keyboard(brands: list) -> InlineKeyboardMarkup:
+    """Клавиатура с брендами"""
+    buttons = []
+    for brand in brands:
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🏷 {brand.name}",
+                callback_data=f"sell_brand:{brand.id}"
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="sell_back_to_categories")
+    ])
+    buttons.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="sell_cancel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def create_categories_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с категориями"""
@@ -40,18 +58,18 @@ def create_categories_keyboard() -> InlineKeyboardMarkup:
 
 
 def create_products_keyboard(products: list, category: str) -> InlineKeyboardMarkup:
-    """Клавиатура с товарами категории"""
+    """Клавиатура с товарами (вкусами)"""
     buttons = []
     for product in products:
-        stock_info = f"({product.quantity} шт)" if product.quantity > 0 else "(нет в наличии)"
+        stock_info = f"({product.quantity} шт)" if product.quantity > 0 else "(нет)"
         buttons.append([
             InlineKeyboardButton(
-                text=f"{product.title} {stock_info}",
+                text=f"{product.flavor} {stock_info}",
                 callback_data=f"sell_prod:{product.id}"
             )
         ])
     buttons.append([
-        InlineKeyboardButton(text="◀️ Назад", callback_data="sell_back_to_categories")
+        InlineKeyboardButton(text="◀️ Назад", callback_data="sell_back_to_brands")
     ])
     buttons.append([
         InlineKeyboardButton(text="❌ Отмена", callback_data="sell_cancel")
@@ -81,25 +99,25 @@ async def sell_start(message: Message, state: FSMContext):
 async def select_category(
     callback: CallbackQuery,
     state: FSMContext,
-    products_db: ProductsSQL
+    brands_db: BrandsSQL
 ):
-    """Выбор категории"""
+    """Выбор категории - показываем бренды"""
     category = callback.data.split(":")[1]
     
-    # Получаем товары категории
-    products = await products_db.get_by_category(category)
+    # Получаем бренды категории
+    brands = await brands_db.get_brands_by_category(category)
     
-    if not products:
-        await callback.answer("⚠️ В этой категории нет товаров", show_alert=True)
+    if not brands:
+        await callback.answer("⚠️ В этой категории нет брендов", show_alert=True)
         return
 
     await state.update_data(category=category)
-    await state.set_state(SellProductStates.selecting_product)
+    await state.set_state(SellProductStates.selecting_brand)
     
     await callback.message.edit_text(
         f"📦 <b>Категория: {category.capitalize()}</b>\n\n"
-        f"Выберите товар для продажи:",
-        reply_markup=create_products_keyboard(products, category),
+        f"Выберите бренд:",
+        reply_markup=create_brands_keyboard(brands),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -118,13 +136,67 @@ async def back_to_categories(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "sell_back_to_brands")
+async def back_to_brands(callback: CallbackQuery, state: FSMContext, brands_db: BrandsSQL):
+    """Возврат к выбору брендов"""
+    data = await state.get_data()
+    category = data.get("category")
+    
+    if not category:
+        return await back_to_categories(callback, state)
+    
+    brands = await brands_db.get_brands_by_category(category)
+    
+    if not brands:
+        return await back_to_categories(callback, state)
+    
+    await state.set_state(SellProductStates.selecting_brand)
+    await callback.message.edit_text(
+        f"📦 <b>Категория: {category.capitalize()}</b>\n\n"
+        f"Выберите бренд:",
+        reply_markup=create_brands_keyboard(brands),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("sell_brand:"))
+async def select_brand(
+    callback: CallbackQuery,
+    state: FSMContext,
+    products_db: ProductsSQL
+):
+    """Выбор бренда - показываем товары"""
+    brand_id = int(callback.data.split(":")[1])
+    
+    # Получаем товары бренда
+    products = await products_db.get_products_by_brand(brand_id)
+    
+    if not products:
+        await callback.answer("⚠️ У этого бренда нет товаров", show_alert=True)
+        return
+    
+    brand_name = products[0].brand_name if products else "Неизвестно"
+    
+    await state.update_data(brand_id=brand_id, brand_name=brand_name)
+    await state.set_state(SellProductStates.selecting_product)
+    
+    await callback.message.edit_text(
+        f"🏷 <b>Бренд: {brand_name}</b>\n\n"
+        f"Выберите вкус:",
+        reply_markup=create_products_keyboard(products, ""),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("sell_prod:"))
 async def select_product(
     callback: CallbackQuery,
     state: FSMContext,
     products_db: ProductsSQL
 ):
-    """Выбор товара"""
+    """Выбор товара (вкуса)"""
     product_id = int(callback.data.split(":")[1])
     
     # Получаем данные о товаре
@@ -141,14 +213,15 @@ async def select_product(
 
     await state.update_data(
         product_id=product_id,
-        product_title=product.title,
+        product_flavor=product.flavor,
+        brand_name=product.brand_name,
         product_price=product.price,
         product_quantity=product.quantity
     )
     await state.set_state(SellProductStates.entering_quantity)
     
     await callback.message.edit_text(
-        f"📦 <b>{product.title}</b>\n\n"
+        f"📦 <b>{product.brand_name} - {product.flavor}</b>\n\n"
         f"💰 Цена: {product.price}₽\n"
         f"📊 Остаток: {product.quantity} шт\n\n"
         f"Введите количество для продажи (1-{product.quantity}):",
@@ -246,7 +319,8 @@ async def enter_price(
         # Итоговое сообщение
         await message.answer(
             f"✅ <b>Продажа завершена!</b>\n\n"
-            f"📦 Товар: {data['product_title']}\n"
+            f"🏷 Бренд: {data['brand_name']}\n"
+            f"📦 Вкус: {data['product_flavor']}\n"
             f"📊 Количество: {data['sell_quantity']} шт\n"
             f"💰 Сумма: {price}₽\n"
             f"📉 Остаток на складе: {new_quantity} шт",

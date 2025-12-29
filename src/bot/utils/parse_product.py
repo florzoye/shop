@@ -1,21 +1,22 @@
 from typing import List, Tuple
-from src.bot.models.base import ProductModel, ProductCategory
+from src.bot.models.base import ProductModel, ProductCategory, BrandModel
 
 
-def parse_batch_products(text: str) -> Tuple[List[ProductModel], List[str]]:
+def parse_batch_products(text: str) -> Tuple[List[Tuple[BrandModel, ProductModel]], List[str]]:
     """
-    Парсит текст с товарами
+    Парсит текст с товарами в новом формате
     
-    Формат: категория | название | количество | цена
-    Пример: снюс | VELO Ice Cool Mint | 50 | 450
+    Формат: категория | бренд | вкус | количество | цена
+    Пример: снюс | BOSHKI | Ice Mint | 50 | 450
     
     Returns:
-        Tuple[List[ProductModel], List[str]]: (список товаров, список ошибок)
+        Tuple[List[Tuple[BrandModel, ProductModel]], List[str]]: 
+        (список (бренд, товар), список ошибок)
     """
     if not text or not text.strip():
         return [], ["❌ Пустое сообщение"]
     
-    products = []
+    items = []  # [(brand, product), ...]
     errors = []
     
     # Разбиваем на строки
@@ -29,14 +30,15 @@ def parse_batch_products(text: str) -> Tuple[List[ProductModel], List[str]]:
             # Разбиваем по разделителю |
             parts = [part.strip() for part in line.split('|')]
             
-            if len(parts) != 4:
+            if len(parts) != 5:
                 errors.append(
                     f"⚠️ Строка {line_num}: неверное количество полей "
-                    f"(ожидается 4, получено {len(parts)})"
+                    f"(ожидается 5, получено {len(parts)})\n"
+                    f"Формат: категория | бренд | вкус | количество | цена"
                 )
                 continue
             
-            category_str, title, quantity_str, price_str = parts
+            category_str, brand_name, flavor, quantity_str, price_str = parts
             
             # Валидация категории
             category_str_lower = category_str.lower()
@@ -49,13 +51,19 @@ def parse_batch_products(text: str) -> Tuple[List[ProductModel], List[str]]:
                 )
                 continue
             
-            # Преобразуем категорию
             category = ProductCategory(category_str_lower)
             
-            # Валидация названия
-            if not title or len(title) < 2:
+            # Валидация бренда
+            if not brand_name or len(brand_name) < 2:
                 errors.append(
-                    f"⚠️ Строка {line_num}: название товара слишком короткое"
+                    f"⚠️ Строка {line_num}: название бренда слишком короткое"
+                )
+                continue
+            
+            # Валидация вкуса
+            if not flavor or len(flavor) < 2:
+                errors.append(
+                    f"⚠️ Строка {line_num}: название вкуса слишком короткое"
                 )
                 continue
             
@@ -87,19 +95,25 @@ def parse_batch_products(text: str) -> Tuple[List[ProductModel], List[str]]:
                 )
                 continue
             
-            # Создаём товар
+            # Создаём бренд и товар
+            brand = BrandModel(
+                name=brand_name,
+                category=category
+            )
+            
             product = ProductModel(
-                title=title,
-                category=category,
+                brand_id=0,  # Будет установлен позже
+                flavor=flavor,
                 quantity=quantity,
                 price=price
             )
-            products.append(product)
+            
+            items.append((brand, product))
             
         except Exception as e:
             errors.append(f"⚠️ Строка {line_num}: неожиданная ошибка - {str(e)}")
     
-    return products, errors
+    return items, errors
 
 
 def format_product_list(products: List[ProductModel]) -> str:
@@ -110,7 +124,8 @@ def format_product_list(products: List[ProductModel]) -> str:
     lines = []
     for p in products:
         lines.append(
-            f"• {p.title}\n"
-            f"  └ {p.category.value} | {p.quantity} шт | {p.price}₽"
+            f"• {p.brand_name} - {p.flavor}\n"
+            f"  └ {p.category.value if p.category else 'N/A'} | "
+            f"{p.quantity} шт | {p.price}₽"
         )
     return "\n".join(lines)
