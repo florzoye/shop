@@ -6,41 +6,12 @@ from aiogram.fsm.context import FSMContext
 from src.bot.models.base import ProductCategory
 from src.bot.utils.logger import setup_logger
 
-from db.crud import ProductsSQL
+from db.crud import BrandsSQL, ProductsSQL
 
 
 router = Router()
 logger = setup_logger("catalog")
 
-def create_brands_keyboard(brands) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(
-            text=f"🏷 {brand.name}",
-            callback_data=f"catalog_brand:{brand.id}"
-        )]
-        for brand in brands
-    ]
-
-    buttons.append([
-        InlineKeyboardButton(text="◀️ Назад", callback_data="catalog_categories")
-    ])
-
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def create_flavors_keyboard(products) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(
-            text=f"{p.flavor} ({p.quantity} шт)",
-            callback_data=f"catalog_product:{p.id}"
-        )]
-        for p in products if p.quantity > 0
-    ]
-
-    buttons.append([
-        InlineKeyboardButton(text="◀️ Назад", callback_data="catalog_back_to_brands")
-    ])
-
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def create_main_catalog_keyboard() -> InlineKeyboardMarkup:
     """Главная клавиатура каталога"""
@@ -70,7 +41,8 @@ def create_categories_keyboard() -> InlineKeyboardMarkup:
         "поды": "📱",
         "жидкости": "💧",
         "пластики": "🔋",
-        "расходники": "🔧"
+        "расходники": "🔧",
+        "разное": "📦"
     }
     
     for category in ProductCategory:
@@ -83,7 +55,42 @@ def create_categories_keyboard() -> InlineKeyboardMarkup:
         ])
     
     buttons.append([
-        InlineKeyboardButton(text="◀️ Назад", callback_data="catalog_back")
+        InlineKeyboardButton(text="◀️ В меню", callback_data="catalog_back")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def create_brands_keyboard_catalog(brands: list, category: str) -> InlineKeyboardMarkup:
+    """Клавиатура с брендами для каталога"""
+    buttons = []
+    for brand in brands:
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🏷 {brand.name}",
+                callback_data=f"catalog_brand:{brand.id}"
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="◀️ К категориям", callback_data="catalog_categories")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def create_products_keyboard_catalog(products: list, brand_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура с товарами конкретного бренда"""
+    buttons = []
+    for product in products:
+        stock_emoji = "✅" if product.quantity > 0 else "❌"
+        stock_text = f"{product.quantity} шт" if product.quantity > 0 else "нет"
+        text = f"{stock_emoji} {product.flavor} — {product.price}₽ ({stock_text})"
+        buttons.append([
+            InlineKeyboardButton(
+                text=text,
+                callback_data=f"catalog_prod:{product.id}"
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="◀️ К брендам", callback_data="catalog_back_to_brands")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -156,8 +163,9 @@ async def catalog_start(message: Message):
 
 
 @router.callback_query(F.data == "catalog_back")
-async def catalog_back(callback: CallbackQuery):
+async def catalog_back(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню каталога"""
+    await state.clear()
     await callback.message.edit_text(
         "🛍 <b>Каталог товаров</b>\n\n"
         "Выберите способ просмотра:",
@@ -173,6 +181,126 @@ async def show_categories(callback: CallbackQuery):
     await callback.message.edit_text(
         "📂 <b>Выберите категорию:</b>",
         reply_markup=create_categories_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("catalog_cat:"))
+async def show_category_brands(
+    callback: CallbackQuery,
+    state: FSMContext,
+    brands_db: BrandsSQL
+):
+    """Показать бренды категории"""
+    category = callback.data.split(":")[1]
+    brands = await brands_db.get_brands_by_category(category)
+    
+    if not brands:
+        await callback.answer(
+            f"📭 В категории '{category}' нет брендов",
+            show_alert=True
+        )
+        return
+    
+    await state.update_data(
+        current_category=category,
+        view_mode=f"category_brands:{category}"
+    )
+    
+    await callback.message.edit_text(
+        f"📂 <b>Категория: {category.capitalize()}</b>\n\n"
+        f"Выберите бренд ({len(brands)} шт):",
+        reply_markup=create_brands_keyboard_catalog(brands, category),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("catalog_brand:"))
+async def show_brand_products(
+    callback: CallbackQuery,
+    state: FSMContext,
+    products_db: ProductsSQL
+):
+    """Показать товары бренда"""
+    brand_id = int(callback.data.split(":")[1])
+    products = await products_db.get_products_by_brand(brand_id)
+    
+    if not products:
+        await callback.answer("📭 У этого бренда нет товаров", show_alert=True)
+        return
+    
+    brand_name = products[0].brand_name if products else "Неизвестно"
+    category = products[0].category.value if products and products[0].category else "N/A"
+    
+    await state.update_data(
+        current_brand_id=brand_id,
+        current_brand_name=brand_name,
+        view_mode=f"brand_products:{brand_id}"
+    )
+    
+    await callback.message.edit_text(
+        f"🏷 <b>{brand_name}</b>\n"
+        f"📂 Категория: {category}\n"
+        f"📊 Всего товаров: {len(products)}\n",
+        reply_markup=create_products_keyboard_catalog(products, brand_id),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("catalog_prod:"))
+async def show_product_details(
+    callback: CallbackQuery,
+    products_db: ProductsSQL
+):
+    """Показать детали товара"""
+    product_id = int(callback.data.split(":")[1])
+    
+    products = await products_db.get_all()
+    product = next((p for p in products if p.id == product_id), None)
+    
+    if not product:
+        await callback.answer("❌ Товар не найден", show_alert=True)
+        return
+    
+    stock_emoji = "✅" if product.quantity > 0 else "❌"
+    stock_text = f"{product.quantity} шт" if product.quantity > 0 else "нет в наличии"
+    
+    details = (
+        f"{stock_emoji} {product.brand_name} - {product.flavor}\n\n"
+        f"📂 Категория: {product.category.value if product.category else 'N/A'}\n"
+        f"🏷 Бренд: {product.brand_name}\n"
+        f"💰 Цена: {product.price}₽\n"
+        f"📊 Остаток: {stock_text}"
+    )
+    
+    await callback.answer(details, show_alert=True)
+
+
+@router.callback_query(F.data == "catalog_back_to_brands")
+async def back_to_brands_catalog(
+    callback: CallbackQuery,
+    state: FSMContext,
+    brands_db: BrandsSQL
+):
+    """Возврат к списку брендов"""
+    data = await state.get_data()
+    category = data.get("current_category")
+    
+    if not category:
+        return await show_categories(callback)
+    
+    brands = await brands_db.get_brands_by_category(category)
+    
+    if not brands:
+        return await show_categories(callback)
+    
+    await callback.message.edit_text(
+        f"📂 <b>Категория: {category.capitalize()}</b>\n\n"
+        f"Выберите бренд ({len(brands)} шт):",
+        reply_markup=create_brands_keyboard_catalog(brands, category),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -223,87 +351,6 @@ async def show_in_stock(
     await show_products_page(callback.message, products, 1, "Товары в наличии")
     await callback.answer()
 
-from db.crud import BrandsSQL
-
-@router.callback_query(F.data.startswith("catalog_cat:"))
-async def show_category_brands(
-    callback: CallbackQuery,
-    brands_db: BrandsSQL,
-    state: FSMContext
-):
-    category = callback.data.split(":")[1]
-
-    brands = await brands_db.get_brands_by_category(category)
-
-    if not brands:
-        return await callback.answer(
-            "📭 В этой категории нет брендов",
-            show_alert=True
-        )
-
-    await state.update_data(
-        selected_category=category
-    )
-
-    await callback.message.edit_text(
-        f"🏷 <b>Бренды в категории:</b>",
-        reply_markup=create_brands_keyboard(brands),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("catalog_brand:"))
-async def show_brand_flavors(
-    callback: CallbackQuery,
-    products_db: ProductsSQL,
-    brands_db: BrandsSQL,
-    state: FSMContext
-):
-    brand_id = int(callback.data.split(":")[1])
-
-    products = await products_db.get_products_by_brand(brand_id)
-    products = [p for p in products if p.quantity > 0]
-
-    if not products:
-        return await callback.answer(
-            "📭 У этого бренда нет товаров в наличии",
-            show_alert=True
-        )
-
-    brand = await brands_db.get_brand_by_id(brand_id)
-
-    await state.update_data(
-        selected_brand_id=brand_id
-    )
-
-    await callback.message.edit_text(
-        f"🧾 <b>{brand.name}</b>\nВыберите вкус:",
-        reply_markup=create_flavors_keyboard(products),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@router.callback_query(F.data == "catalog_back_to_brands")
-async def back_to_brands(
-    callback: CallbackQuery,
-    brands_db: BrandsSQL,
-    state: FSMContext
-):
-    data = await state.get_data()
-    category = data.get("selected_category")
-
-    if not category:
-        return await callback.answer()
-
-    brands = await brands_db.get_brands_by_category(category)
-
-    await callback.message.edit_text(
-        "🏷 <b>Бренды:</b>",
-        reply_markup=create_brands_keyboard(brands),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
 
 @router.callback_query(F.data.startswith("catalog_page:"))
 async def handle_pagination(
@@ -326,9 +373,6 @@ async def handle_pagination(
         title = "Все товары"
     elif view_mode == "in_stock":
         title = "Товары в наличии"
-    elif view_mode.startswith("category:"):
-        category = view_mode.split(":")[1]
-        title = f"Категория: {category.capitalize()}"
     else:
         title = "Каталог"
     

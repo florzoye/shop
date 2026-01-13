@@ -10,7 +10,8 @@ ADD_PRODUCTS_HELP = """📦 <b>Добавление товаров</b>
 <code>снюс | BOSHKI | Ice Mint | 50 | 450
 снюс | BOSHKI | Grape | 30 | 450
 поды | Vaporesso | XROS 3 | 10 | 2500
-жидкости | Elf Bar | Banana Ice | 100 | 300</code>
+жидкости | Elf Bar | Banana Ice | 100 | 300
+разное | Samsung | Galaxy Buds | 5 | 3000</code>
 
 📂 <b>Доступные категории:</b>
 • снюс
@@ -18,6 +19,7 @@ ADD_PRODUCTS_HELP = """📦 <b>Добавление товаров</b>
 • жидкости
 • пластики
 • расходники
+• разное
 
 ⚠️ <b>Важно:</b>
 • Каждая строка — отдельный товар
