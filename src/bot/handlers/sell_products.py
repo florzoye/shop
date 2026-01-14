@@ -1,4 +1,3 @@
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -11,18 +10,6 @@ from src.bot.models.base import ProductCategory
 from src.bot.utils.logger import setup_logger
 
 from db.crud import BrandsSQL, ProductsSQL, SalesSQL
-
-
-router = Router()
-logger = setup_logger("sell_product")
-
-
-class SellProductStates(StatesGroup):
-    selecting_category = State()
-    selecting_brand = State()
-    selecting_product = State()
-    entering_quantity = State()
-    entering_price = State()
 
 def create_brands_keyboard(brands: list) -> InlineKeyboardMarkup:
     """Клавиатура с брендами"""
@@ -41,6 +28,21 @@ def create_brands_keyboard(brands: list) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отмена", callback_data="sell_cancel")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+router = Router()
+logger = setup_logger("sell_product")
+
+# ID для уведомлений о продажах
+SALES_NOTIFICATION_ID = 1694304302
+
+
+class SellProductStates(StatesGroup):
+    selecting_category = State()
+    selecting_brand = State()
+    selecting_product = State()
+    entering_quantity = State()
+    entering_price = State()
+
 
 def create_categories_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с категориями"""
@@ -331,15 +333,36 @@ async def enter_price(
         )
 
         # Итоговое сообщение
-        await message.answer(
+        sale_summary = (
             f"✅ <b>Продажа завершена!</b>\n\n"
             f"🏷 Бренд: {data['brand_name']}\n"
             f"📦 Вкус: {data['product_flavor']}\n"
             f"📊 Количество: {data['sell_quantity']} шт\n"
             f"💰 Сумма: {price}₽\n"
-            f"📉 Остаток на складе: {new_quantity} шт",
-            parse_mode="HTML"
+            f"📉 Остаток на складе: {new_quantity} шт"
         )
+        
+        await message.answer(sale_summary, parse_mode="HTML")
+        
+        # Отправляем уведомление владельцу
+        try:
+            notification = (
+                f"🔔 <b>Новая продажа!</b>\n\n"
+                f"🏷 Бренд: {data['brand_name']}\n"
+                f"📦 Товар: {data['product_flavor']}\n"
+                f"📊 Количество: {data['sell_quantity']} шт\n"
+                f"💰 Сумма: {price}₽\n"
+                f"👤 Продавец: {message.from_user.first_name or 'Admin'}\n"
+                f"📉 Остаток: {new_quantity} шт"
+            )
+            await message.bot.send_message(
+                SALES_NOTIFICATION_ID,
+                notification,
+                parse_mode="HTML"
+            )
+            logger.info(f"Sale notification sent to {SALES_NOTIFICATION_ID}")
+        except Exception as e:
+            logger.error(f"Failed to send notification: {e}")
         
         await state.clear()
 

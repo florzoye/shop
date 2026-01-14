@@ -20,6 +20,7 @@ def create_products_table_sql() -> str:
         flavor TEXT NOT NULL,
         quantity INTEGER NOT NULL DEFAULT 0,
         price REAL NOT NULL,
+        photo_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE,
         UNIQUE(brand_id, flavor)
@@ -94,7 +95,8 @@ def select_product_by_brand_and_flavor_sql() -> str:
         b.category,
         p.flavor,
         p.quantity,
-        p.price
+        p.price,
+        p.photo_id
     FROM products p
     JOIN brands b ON p.brand_id = b.id
     WHERE p.brand_id = :brand_id AND p.flavor = :flavor
@@ -111,7 +113,8 @@ def select_products_by_brand_sql() -> str:
         b.category,
         p.flavor,
         p.quantity,
-        p.price
+        p.price,
+        p.photo_id
     FROM products p
     JOIN brands b ON p.brand_id = b.id
     WHERE p.brand_id = :brand_id
@@ -128,7 +131,8 @@ def select_all_products_sql() -> str:
         b.category,
         p.flavor,
         p.quantity,
-        p.price
+        p.price,
+        p.photo_id
     FROM products p
     JOIN brands b ON p.brand_id = b.id
     ORDER BY b.category, b.name, p.flavor;
@@ -144,7 +148,8 @@ def select_products_by_category_sql() -> str:
         b.category,
         p.flavor,
         p.quantity,
-        p.price
+        p.price,
+        p.photo_id
     FROM products p
     JOIN brands b ON p.brand_id = b.id
     WHERE b.category = :category
@@ -160,18 +165,20 @@ def update_product_quantity_sql() -> str:
     """
 
 
+def update_product_photo_sql() -> str:
+    return """
+    UPDATE products
+    SET photo_id = :photo_id
+    WHERE id = :id;
+    """
+
+
 def delete_product_sql() -> str:
     return """
     DELETE FROM products
     WHERE id = :id;
     """
 
-def select_brand_by_id_sql() -> str:
-    return """
-    SELECT id, name, category
-    FROM brands
-    WHERE id = :id
-    """
 
 # ===== SALES =====
 

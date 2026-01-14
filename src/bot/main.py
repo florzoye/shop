@@ -11,6 +11,7 @@ from src.bot.config import bot_config
 from src.bot.handlers.add_products import router as add_products_router
 from src.bot.handlers.sell_products import router as sell_router
 from src.bot.handlers.delete_product import router as delete_router
+from src.bot.handlers.manage_photo import router as photo_router
 from src.bot.handlers.cancel import router as cancel_router
 from src.bot.handlers.catalog import router as catalog_router
 from src.bot.handlers.start import router as start_router
@@ -36,6 +37,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="add_products", description="📦 Добавить товары"),
         BotCommand(command="sell", description="💰 Продать товар"),
         BotCommand(command="delete", description="🗑 Удалить товар"),
+        BotCommand(command="photo", description="📸 Управление фото"),
         BotCommand(command="cancel", description="❌ Отменить операцию"),
     ]
     await bot.set_my_commands(commands)
@@ -104,6 +106,7 @@ async def start_bot():
         dp.include_router(add_products_router)
         dp.include_router(sell_router)
         dp.include_router(delete_router)
+        dp.include_router(photo_router)
         
         # Стартуем
         await on_startup()

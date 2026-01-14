@@ -20,8 +20,8 @@ from db.schemas import (
     select_all_sales_sql,
     select_sales_by_date_range_sql,
     update_product_quantity_sql,
+    update_product_photo_sql,
     delete_product_sql,
-    select_brand_by_id_sql
 )
 from src.bot.models.base import BrandModel, ProductModel, SaleModel
 
@@ -104,20 +104,6 @@ class BrandsSQL:
         except Exception as e:
             self.logger.error(f"Error fetching all brands: {e}")
             return []
-    
-    async def get_brand_by_id(self, brand_id: int) -> BrandModel | None:
-        """Получить бренд по ID"""
-        try:
-            row = await self.db.fetchone(
-                select_brand_by_id_sql(),
-                {"id": brand_id}
-            )
-            if row:
-                return BrandModel(**row)
-            return None
-        except Exception as e:
-            self.logger.error(f"Error fetching brand by id: {e}", exc_info=True)
-            return None
 
 
 class ProductsSQL:
@@ -134,19 +120,26 @@ class ProductsSQL:
             return False
 
     async def add_product(self, product: ProductModel) -> bool:
+        """Добавление товара или пополнение существующего"""
         try:
+            # Проверяем существование
             existing = await self.get_product_by_brand_and_flavor(
-                product.brand_id,
-                product.flavor
+                product.brand_id, product.flavor
             )
-
+            
             if existing:
+                # Пополняем
                 new_quantity = existing.quantity + product.quantity
                 await self.db.execute(
                     update_product_quantity_sql(),
                     {"id": existing.id, "quantity": new_quantity}
                 )
+                self.logger.info(
+                    f"Updated product {existing.id}: "
+                    f"{existing.quantity} + {product.quantity} = {new_quantity}"
+                )
             else:
+                # Добавляем новый
                 await self.db.execute(
                     insert_product_sql(),
                     {
@@ -156,22 +149,12 @@ class ProductsSQL:
                         "price": product.price,
                     }
                 )
-
+                self.logger.info(f"Added new product: {product.flavor}")
+            
             return True
-
-        except Exception:
-            self.logger.error("Error adding product", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"Error adding product: {e}", exc_info=True)
             return False
-
-    async def add_products_batch(self, products: list[ProductModel]) -> int:
-        added = 0
-
-        for product in products:
-            if await self.add_product(product):
-                added += 1
-
-        self.logger.info(f"Batch: {added}/{len(products)} products")
-        return added
 
     async def add_products_batch(self, products: List[ProductModel]) -> int:
         """Массовое добавление"""
@@ -258,6 +241,19 @@ class ProductsSQL:
             return True
         except Exception as e:
             self.logger.error(f"Error deleting product: {e}")
+            return False
+
+    async def update_photo(self, product_id: int, photo_id: str | None) -> bool:
+        """Обновление фото товара"""
+        try:
+            await self.db.execute(
+                update_product_photo_sql(),
+                {"id": product_id, "photo_id": photo_id}
+            )
+            self.logger.info(f"Updated photo for product {product_id}: {photo_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error updating photo: {e}", exc_info=True)
             return False
 
 
