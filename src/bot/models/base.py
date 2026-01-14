@@ -9,6 +9,7 @@ class ProductCategory(StrEnum):
     liquids = "жидкости"
     plastics = "пластики"
     consumables = "расходники"
+    other = "разное"
 
 
 class BrandModel(BaseModel):

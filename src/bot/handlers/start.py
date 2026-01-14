@@ -27,7 +27,8 @@ def create_admin_keyboard() -> ReplyKeyboardMarkup:
     """Клавиатура для администраторов"""
     keyboard = [
         [KeyboardButton(text="🛍 Каталог")],
-        [KeyboardButton(text="📦 Добавить товары"), KeyboardButton(text="💰 Продать")]
+        [KeyboardButton(text="📦 Добавить товары"), KeyboardButton(text="💰 Продать")],
+        [KeyboardButton(text="🗑 Удалить товар")]
     ]
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
@@ -53,12 +54,14 @@ async def cmd_start(message: Message):
             f"Доступные функции:\n"
             f"📦 Управление товарами\n"
             f"💰 Продажи\n"
+            f"🗑 Удаление товаров\n"
             f"🛍 Просмотр каталога"
         )
     else:
         keyboard = create_user_keyboard()
         welcome_text = (
             f"👋 Привет, <b>{username}</b>!\n\n"
+            f"Добро пожаловать в наш магазин! 🛍\n\n"
             f"Используйте кнопку ниже для просмотра каталога товаров."
         )
     
@@ -92,8 +95,18 @@ async def sell_button(message: Message, state: FSMContext):
     if message.from_user.id not in bot_config.admin_ids:
         return await message.answer("⛔ Нет доступа")
     
-    from src.bot.handlers.sell_products import sell_start
+    from src.bot.handlers.sell_product import sell_start
     await sell_start(message, state)
+
+
+@router.message(F.text == "🗑 Удалить товар")
+async def delete_button(message: Message, state: FSMContext):
+    """Обработка кнопки 'Удалить товар'"""
+    if message.from_user.id not in bot_config.admin_ids:
+        return await message.answer("⛔ Нет доступа")
+    
+    from src.bot.handlers.delete_product import delete_start
+    await delete_start(message, state)
 
 
 @router.message(Command("menu"))

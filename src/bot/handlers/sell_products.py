@@ -1,3 +1,4 @@
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -44,10 +45,21 @@ def create_brands_keyboard(brands: list) -> InlineKeyboardMarkup:
 def create_categories_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с категориями"""
     buttons = []
+    
+    category_emojis = {
+        "снюс": "🌿",
+        "поды": "📱",
+        "жидкости": "💧",
+        "пластики": "🔋",
+        "расходники": "🔧",
+        "разное": "📦"
+    }
+    
     for category in ProductCategory:
+        emoji = category_emojis.get(category.value, "📦")
         buttons.append([
             InlineKeyboardButton(
-                text=f"📦 {category.value.capitalize()}",
+                text=f"{emoji} {category.value.capitalize()}",
                 callback_data=f"sell_cat:{category.value}"
             )
         ])
@@ -62,9 +74,11 @@ def create_products_keyboard(products: list, category: str) -> InlineKeyboardMar
     buttons = []
     for product in products:
         stock_info = f"({product.quantity} шт)" if product.quantity > 0 else "(нет)"
+        # Показываем цену в кнопке
+        text = f"{product.flavor} — {product.price}₽ {stock_info}"
         buttons.append([
             InlineKeyboardButton(
-                text=f"{product.flavor} {stock_info}",
+                text=text,
                 callback_data=f"sell_prod:{product.id}"
             )
         ])
