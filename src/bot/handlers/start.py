@@ -28,7 +28,7 @@ def create_admin_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(text="🛍 Каталог")],
         [KeyboardButton(text="📦 Добавить товары"), KeyboardButton(text="💰 Продать")],
-        [KeyboardButton(text="🗑 Удалить товар")]
+        [KeyboardButton(text="🗑 Удалить товар"), KeyboardButton(text="📸 Фото")]
     ]
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
@@ -95,7 +95,7 @@ async def sell_button(message: Message, state: FSMContext):
     if message.from_user.id not in bot_config.admin_ids:
         return await message.answer("⛔ Нет доступа")
     
-    from src.bot.handlers.sell_product import sell_start
+    from src.bot.handlers.sell_products import sell_start
     await sell_start(message, state)
 
 
@@ -107,6 +107,16 @@ async def delete_button(message: Message, state: FSMContext):
     
     from src.bot.handlers.delete_product import delete_start
     await delete_start(message, state)
+
+
+@router.message(F.text == "📸 Фото")
+async def photo_button(message: Message, state: FSMContext):
+    """Обработка кнопки 'Фото'"""
+    if message.from_user.id not in bot_config.admin_ids:
+        return await message.answer("⛔ Нет доступа")
+    
+    from src.bot.handlers.manage_photo import photo_start
+    await photo_start(message, state)
 
 
 @router.message(Command("menu"))

@@ -28,6 +28,7 @@ class ProductModel(BaseModel):
     flavor: str  # Вкус
     quantity: int
     price: float
+    photo_id: str | None = None  # ID фото в Telegram
 
 
 class SaleModel(BaseModel):
