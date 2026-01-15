@@ -61,19 +61,23 @@ def select_brand_by_name_and_category_sql() -> str:
 
 
 def select_brands_by_category_sql() -> str:
+    """Получить бренды категории (только с товарами)"""
     return """
-    SELECT id, name, category
-    FROM brands
-    WHERE category = :category
-    ORDER BY name;
+    SELECT DISTINCT b.id, b.name, b.category
+    FROM brands b
+    INNER JOIN products p ON b.id = p.brand_id
+    WHERE b.category = :category
+    ORDER BY b.name;
     """
 
 
 def select_all_brands_sql() -> str:
+    """Получить все бренды (только с товарами)"""
     return """
-    SELECT id, name, category
-    FROM brands
-    ORDER BY category, name;
+    SELECT DISTINCT b.id, b.name, b.category
+    FROM brands b
+    INNER JOIN products p ON b.id = p.brand_id
+    ORDER BY b.category, b.name;
     """
 
 

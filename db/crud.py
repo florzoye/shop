@@ -85,7 +85,7 @@ class BrandsSQL:
             return None
 
     async def get_brands_by_category(self, category: str) -> List[BrandModel]:
-        """Получить бренды категории"""
+        """Получить бренды категории (только с товарами)"""
         try:
             rows = await self.db.fetchall(
                 select_brands_by_category_sql(),
@@ -97,7 +97,7 @@ class BrandsSQL:
             return []
 
     async def get_all_brands(self) -> List[BrandModel]:
-        """Получить все бренды"""
+        """Получить все бренды (только с товарами)"""
         try:
             rows = await self.db.fetchall(select_all_brands_sql())
             return [BrandModel(**row) for row in rows]
