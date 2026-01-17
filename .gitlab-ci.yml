@@ -4,19 +4,14 @@ stages:
 variables:
   PROJECT_DIR: "/root/shop"
 
-.deploy_template: &deploy_template
+deploy_production:
+  stage: deploy
   tags:
     - shop-server
   before_script:
     - cd $PROJECT_DIR
     - echo "📦 Docker version: $(docker --version)"
     - echo "📦 Docker Compose version: $(docker-compose --version)"
-  after_script:
-    - echo "✅ Job completed at $(date)"
-
-deploy_production:
-  <<: *deploy_template
-  stage: deploy
   script:
     - |
       set -ex
@@ -64,29 +59,10 @@ deploy_production:
       docker-compose logs --tail=10 bot
       
       echo "✅ Deployment successful!"
+  after_script:
+    - echo "✅ Job completed at $(date)"
   only:
     - main
   when: manual
   environment:
     name: production
-
-deploy_auto:
-  <<: *deploy_template
-  stage: deploy
-  script:
-    - |
-      set -ex
-      echo "⚡ Auto-deploy to staging..."
-      
-      git fetch origin
-      git reset --hard origin/develop || git reset --hard origin/main
-      
-      docker-compose down
-      docker-compose build
-      docker-compose up -d
-      
-      sleep 10
-      docker-compose ps
-  only:
-    - develop
-  when: always
