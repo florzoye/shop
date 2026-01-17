@@ -11,6 +11,12 @@ from src.bot.utils.logger import setup_logger
 
 from db.crud import BrandsSQL, ProductsSQL, SalesSQL
 
+router = Router()
+logger = setup_logger("sell_product")
+
+# ID для уведомлений о продажах
+SALES_NOTIFICATION_ID = 1694304302
+
 def create_brands_keyboard(brands: list) -> InlineKeyboardMarkup:
     """Клавиатура с брендами"""
     buttons = []
@@ -29,13 +35,6 @@ def create_brands_keyboard(brands: list) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-router = Router()
-logger = setup_logger("sell_product")
-
-# ID для уведомлений о продажах
-SALES_NOTIFICATION_ID = 1694304302
-
-
 class SellProductStates(StatesGroup):
     selecting_category = State()
     selecting_brand = State()
@@ -52,6 +51,7 @@ def create_categories_keyboard() -> InlineKeyboardMarkup:
         "снюс": "🌿",
         "поды": "📱",
         "жидкости": "💧",
+        "одноразки": "🔥",
         "пластики": "🔋",
         "расходники": "🔧",
         "разное": "📦"

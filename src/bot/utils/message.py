@@ -11,12 +11,14 @@ ADD_PRODUCTS_HELP = """📦 <b>Добавление товаров</b>
 снюс | BOSHKI | Grape | 30 | 450
 поды | Vaporesso | XROS 3 | 10 | 2500
 жидкости | Elf Bar | Banana Ice | 100 | 300
+одноразки | Elf Bar | Watermelon | 50 | 350
 разное | Samsung | Galaxy Buds | 5 | 3000</code>
 
 📂 <b>Доступные категории:</b>
 • снюс
 • поды
 • жидкости
+• одноразки
 • пластики
 • расходники
 • разное

@@ -7,6 +7,7 @@ class ProductCategory(StrEnum):
     snus = "снюс"
     pods = "поды"
     liquids = "жидкости"
+    disposables = "одноразки"
     plastics = "пластики"
     consumables = "расходники"
     other = "разное"
