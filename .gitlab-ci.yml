@@ -1,68 +1,17 @@
 stages:
   - deploy
 
-variables:
-  PROJECT_DIR: "/root/shop"
-
 deploy_production:
   stage: deploy
   tags:
     - shop-server
-  before_script:
-    - cd $PROJECT_DIR
-    - echo "📦 Docker version: $(docker --version)"
-    - echo "📦 Docker Compose version: $(docker-compose --version)"
   script:
-    - |
-      set -ex
-      echo "🚀 Starting production deployment..."
-      
-      # Backup database
-      if [ -f "data/products.db" ]; then
-        echo "💾 Creating backup..."
-        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-        mkdir -p backups
-        cp data/products.db backups/products_backup_${TIMESTAMP}.db
-        echo "Backup: backups/products_backup_${TIMESTAMP}.db"
-        
-        # Keep last 5 backups
-        (ls -t backups/products_backup_*.db 2>/dev/null | head -5; ls backups/products_backup_*.db 2>/dev/null) | sort | uniq -u | xargs -r rm -f
-      fi
-      
-      # Pull latest code
-      echo "📥 Pulling changes..."
-      git fetch origin
-      git reset --hard origin/main
-      
-      # Stop and rebuild
-      echo "🛑 Stopping containers..."
-      docker-compose down || true
-      
-      echo "🏗️ Building..."
-      docker-compose build --no-cache
-      
-      echo "🚀 Starting..."
-      docker-compose up -d
-      
-      # Wait and check
-      echo "⏳ Waiting for startup..."
-      sleep 15
-      
-      # Cleanup
-      echo "🧹 Cleaning up old images..."
-      docker image prune -f
-      
-      # Verify
-      echo "📊 Checking container..."
-      docker-compose ps
-      echo "📝 Recent logs:"
-      docker-compose logs --tail=10 bot
-      
-      echo "✅ Deployment successful!"
-  after_script:
-    - echo "✅ Job completed at $(date)"
+    - echo "🚀 Starting deployment..."
+    - cd /root/shop
+    - docker-compose down || true
+    - docker-compose build
+    - docker-compose up -d
+    - echo "✅ Deployment completed!"
   only:
     - main
   when: manual
-  environment:
-    name: production
