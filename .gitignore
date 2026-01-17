@@ -5,6 +5,8 @@ test.py
 credentials.json
 token.json
 charts/
+backups/
+EOF
 
 # C extensions
 *.so

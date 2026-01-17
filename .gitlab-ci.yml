@@ -1,0 +1,91 @@
+stages:
+  - deploy
+
+deploy_production:
+  stage: deploy
+  image: alpine:latest
+  
+  before_script:
+    # Устанавливаем необходимые пакеты
+    - apk add --no-cache openssh-client bash
+    
+    # Настраиваем SSH
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan -H $SERVER_HOST >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  
+  script:
+    # Подключаемся к серверу и деплоим
+    - |
+      ssh $SERVER_USER@$SERVER_HOST << 'EOF'
+        set -e
+        
+        echo "🚀 Начинаем деплой..."
+        
+        # Переходим в директорию проекта
+        cd $PROJECT_PATH
+        
+        # ✅ ВАЖНО: Создаём backup базы данных перед деплоем
+        echo "💾 Создаём резервную копию базы данных..."
+        BACKUP_DIR="./backups"
+        mkdir -p $BACKUP_DIR
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        
+        if [ -f "./data/products.db" ]; then
+          cp ./data/products.db $BACKUP_DIR/products_backup_$TIMESTAMP.db
+          echo "✅ Backup создан: $BACKUP_DIR/products_backup_$TIMESTAMP.db"
+          
+          # Оставляем только последние 10 бэкапов
+          ls -t $BACKUP_DIR/products_backup_*.db | tail -n +11 | xargs -r rm
+        else
+          echo "⚠️  База данных не найдена, создастся новая при запуске"
+        fi
+        
+        echo "📥 Получаем последние изменения..."
+        git pull origin main
+        
+        echo "🛑 Останавливаем контейнер (база данных сохранена в ./data)..."
+        docker-compose down
+        
+        # ✅ ВАЖНО: Проверяем, что директория data существует
+        echo "📁 Проверяем директорию данных..."
+        mkdir -p ./data
+        ls -lah ./data
+        
+        echo "🏗️ Пересобираем образ..."
+        docker-compose build --no-cache
+        
+        echo "🚀 Запускаем контейнер..."
+        docker-compose up -d
+        
+        # Ждём запуска контейнера
+        echo "⏳ Ожидаем запуск контейнера..."
+        sleep 5
+        
+        echo "🧹 Очищаем старые образы..."
+        docker image prune -f
+        
+        echo "✅ Деплой завершён успешно!"
+        
+        echo "📊 Статус контейнера:"
+        docker-compose ps
+        
+        echo "📝 Последние логи:"
+        docker-compose logs --tail=30 bot
+        
+        echo ""
+        echo "💾 Резервные копии базы данных:"
+        ls -lh $BACKUP_DIR/products_backup_*.db 2>/dev/null || echo "Нет резервных копий"
+      EOF
+  
+  only:
+    - main
+  
+  when: manual  # Запуск вручную через интерфейс GitLab
+  
+  environment:
+    name: production
+    url: https://t.me/your_bot_username  # Замените на имя вашего бота
