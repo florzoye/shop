@@ -1,25 +1,19 @@
-# Используем официальный образ Python
 FROM python:3.11-slim
 
-# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем файл зависимостей
-COPY requirements.txt .
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем зависимости
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь проект
 COPY . .
 
-# Создаём директорию для базы данных
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/backups
 
-# Переменные окружения (будут переопределены при запуске)
-ENV BOT_TOKEN=""
-ENV ADMIN_IDS=""
-ENV DATABASE_PATH="/app/data/products.db"
+ENV PYTHONUNBUFFERED=1
+ENV DATABASE_PATH=/app/data/products.db
 
-# Запускаем бота
 CMD ["python", "main.py"]

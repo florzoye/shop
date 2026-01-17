@@ -1,0 +1,24 @@
+version: '2.2'
+
+services:
+  bot:
+    build: .
+    container_name: telegram_shop_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=/app/data/products.db
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; sqlite3.connect('/app/data/products.db')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

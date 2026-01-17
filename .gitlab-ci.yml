@@ -1,80 +1,92 @@
 stages:
   - deploy
 
-deploy_production:
-  stage: deploy
+variables:
+  PROJECT_DIR: "/root/shop"
+
+.deploy_template: &deploy_template
   tags:
-    - deploy  # Используем ваш собственный runner
-  
+    - shop-server
   before_script:
-    # Ничего не нужно, работаем локально на сервере
-  
+    - cd $PROJECT_DIR
+    - echo "📦 Docker version: $(docker --version)"
+    - echo "📦 Docker Compose version: $(docker-compose --version)"
+  after_script:
+    - echo "✅ Job completed at $(date)"
+
+deploy_production:
+  <<: *deploy_template
+  stage: deploy
   script:
-    # Работаем локально, runner уже на сервере
-    - set -e
-    
-    - echo "🚀 Начинаем деплой..."
-    
-    # Переходим в директорию проекта
-    - cd /root/shop
-    
-    # ✅ ВАЖНО: Создаём backup базы данных перед деплоем
-    - echo "💾 Создаём резервную копию базы данных..."
-    - mkdir -p ./backups
-    - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    
     - |
-      if [ -f "./data/products.db" ]; then
-        cp ./data/products.db ./backups/products_backup_$TIMESTAMP.db
-        echo "✅ Backup создан: ./backups/products_backup_$TIMESTAMP.db"
+      set -ex
+      echo "🚀 Starting production deployment..."
+      
+      # Backup database
+      if [ -f "data/products.db" ]; then
+        echo "💾 Creating backup..."
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        mkdir -p backups
+        cp data/products.db backups/products_backup_${TIMESTAMP}.db
+        echo "Backup: backups/products_backup_${TIMESTAMP}.db"
         
-        # Оставляем только последние 10 бэкапов
-        ls -t ./backups/products_backup_*.db | tail -n +11 | xargs -r rm
-      else
-        echo "⚠️  База данных не найдена, создастся новая при запуске"
+        # Keep last 5 backups
+        (ls -t backups/products_backup_*.db 2>/dev/null | head -5; ls backups/products_backup_*.db 2>/dev/null) | sort | uniq -u | xargs -r rm -f
       fi
-    
-    - echo "📥 Получаем последние изменения..."
-    - git pull origin main
-    
-    - echo "🛑 Останавливаем контейнер (база данных сохранена в ./data)..."
-    - docker-compose down
-    
-    # ✅ ВАЖНО: Проверяем, что директория data существует
-    - echo "📁 Проверяем директорию данных..."
-    - mkdir -p ./data
-    - ls -lah ./data
-    
-    - echo "🏗️ Пересобираем образ..."
-    - docker-compose build --no-cache
-    
-    - echo "🚀 Запускаем контейнер..."
-    - docker-compose up -d
-    
-    # Ждём запуска контейнера
-    - echo "⏳ Ожидаем запуск контейнера..."
-    - sleep 5
-    
-    - echo "🧹 Очищаем старые образы..."
-    - docker image prune -f
-    
-    - echo "✅ Деплой завершён успешно!"
-    
-    - echo "📊 Статус контейнера:"
-    - docker-compose ps
-    
-    - echo "📝 Последние логи:"
-    - docker-compose logs --tail=30 bot
-    
-    - echo ""
-    - echo "💾 Резервные копии базы данных:"
-    - ls -lh ./backups/products_backup_*.db 2>/dev/null || echo "Нет резервных копий"
-  
+      
+      # Pull latest code
+      echo "📥 Pulling changes..."
+      git fetch origin
+      git reset --hard origin/main
+      
+      # Stop and rebuild
+      echo "🛑 Stopping containers..."
+      docker-compose down || true
+      
+      echo "🏗️ Building..."
+      docker-compose build --no-cache
+      
+      echo "🚀 Starting..."
+      docker-compose up -d
+      
+      # Wait and check
+      echo "⏳ Waiting for startup..."
+      sleep 15
+      
+      # Cleanup
+      echo "🧹 Cleaning up old images..."
+      docker image prune -f
+      
+      # Verify
+      echo "📊 Checking container..."
+      docker-compose ps
+      echo "📝 Recent logs:"
+      docker-compose logs --tail=10 bot
+      
+      echo "✅ Deployment successful!"
   only:
     - main
-  
-  when: manual  # Запуск вручную через интерфейс GitLab
-  
+  when: manual
   environment:
     name: production
-    url: https://t.me/your_bot_username  # Замените на имя вашего бота
+
+deploy_auto:
+  <<: *deploy_template
+  stage: deploy
+  script:
+    - |
+      set -ex
+      echo "⚡ Auto-deploy to staging..."
+      
+      git fetch origin
+      git reset --hard origin/develop || git reset --hard origin/main
+      
+      docker-compose down
+      docker-compose build
+      docker-compose up -d
+      
+      sleep 10
+      docker-compose ps
+  only:
+    - develop
+  when: always
