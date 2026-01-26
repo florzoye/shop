@@ -41,6 +41,16 @@ def create_sales_table_sql() -> str:
     );
     """
 
+def create_users_table_sql() -> str:
+    return """
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY,              -- telegram user id
+        username TEXT,
+        first_name TEXT,
+        created_at TIMESTAMP NOT NULL,
+        last_activity TIMESTAMP NOT NULL
+    );
+    """
 
 # ===== BRANDS =====
 
@@ -229,4 +239,46 @@ def select_sales_by_date_range_sql() -> str:
     JOIN brands b ON p.brand_id = b.id
     WHERE s.sale_date BETWEEN :start_date AND :end_date
     ORDER BY s.sale_date DESC;
+    """
+
+
+def insert_user_sql() -> str:
+    return """
+    INSERT INTO users (id, username, first_name, created_at, last_activity)
+    VALUES (:id, :username, :first_name, :created_at, :last_activity)
+    ON CONFLICT(id) DO NOTHING;
+    """
+
+
+def update_user_activity_sql() -> str:
+    return """
+    UPDATE users
+    SET
+        username = :username,
+        first_name = :first_name,
+        last_activity = :last_activity
+    WHERE id = :id;
+    """
+
+
+def select_users_count_sql() -> str:
+    return """
+    SELECT COUNT(*) as count
+    FROM users;
+    """
+
+
+def select_users_created_since_sql() -> str:
+    return """
+    SELECT COUNT(*) as count
+    FROM users
+    WHERE created_at >= :date;
+    """
+
+
+def select_users_active_since_sql() -> str:
+    return """
+    SELECT COUNT(*) as count
+    FROM users
+    WHERE last_activity >= :date;
     """

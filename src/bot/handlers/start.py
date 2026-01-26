@@ -28,7 +28,8 @@ def create_admin_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(text="🛍 Каталог")],
         [KeyboardButton(text="📦 Добавить товары"), KeyboardButton(text="💰 Продать")],
-        [KeyboardButton(text="🗑 Удалить товар"), KeyboardButton(text="📸 Фото")]
+        [KeyboardButton(text="🗑 Удалить товар"), KeyboardButton(text="📸 Фото")],
+        [KeyboardButton(text="📊 Аналитика")]
     ]
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
@@ -117,6 +118,16 @@ async def photo_button(message: Message, state: FSMContext):
     
     from src.bot.handlers.manage_photo import photo_start
     await photo_start(message, state)
+
+
+@router.message(F.text == "📊 Аналитика")
+async def analytics_button(message: Message):
+    """Обработка кнопки 'Аналитика'"""
+    if message.from_user.id not in bot_config.admin_ids:
+        return await message.answer("⛔ Нет доступа")
+    
+    from src.bot.handlers.analytics import analytics_start
+    await analytics_start(message)
 
 
 @router.message(Command("menu"))

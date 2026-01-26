@@ -22,6 +22,12 @@ from db.schemas import (
     update_product_quantity_sql,
     update_product_photo_sql,
     delete_product_sql,
+    create_users_table_sql,
+    select_users_active_since_sql,
+    select_users_count_sql,
+    select_users_created_since_sql,
+    insert_user_sql,
+    update_user_activity_sql
 )
 from src.bot.models.base import BrandModel, ProductModel, SaleModel
 
@@ -319,3 +325,77 @@ class SalesSQL:
         except Exception as e:
             self.logger.error(f"Error fetching sales by date: {e}")
             return []
+
+
+class UsersSQL:
+    def __init__(self, db: AsyncDatabaseManager):
+        self.db = db
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    async def create_tables(self) -> bool:
+        try:
+            await self.db.execute(create_users_table_sql())
+            return True
+        except Exception as e:
+            self.logger.error(f"Error creating users table: {e}", exc_info=True)
+            return False
+
+    async def ensure_user(
+        self,
+        user_id: int,
+        username: str | None,
+        first_name: str | None
+    ) -> None:
+        """Создать пользователя, если его ещё нет"""
+        try:
+            now = datetime.now()
+            await self.db.execute(
+                insert_user_sql(),
+                {
+                    "id": user_id,
+                    "username": username,
+                    "first_name": first_name,
+                    "created_at": now,
+                    "last_activity": now,
+                }
+            )
+        except Exception as e:
+            self.logger.error(f"Error ensuring user: {e}", exc_info=True)
+
+    async def update_activity(
+        self,
+        user_id: int,
+        username: str | None,
+        first_name: str | None
+    ) -> None:
+        """Обновить последнюю активность"""
+        try:
+            await self.db.execute(
+                update_user_activity_sql(),
+                {
+                    "id": user_id,
+                    "username": username,
+                    "first_name": first_name,
+                    "last_activity": datetime.now(),
+                }
+            )
+        except Exception as e:
+            self.logger.error(f"Error updating activity: {e}", exc_info=True)
+
+    async def get_total_users(self) -> int:
+        row = await self.db.fetchone(select_users_count_sql())
+        return row["count"] if row else 0
+
+    async def get_new_users_since(self, date: datetime) -> int:
+        row = await self.db.fetchone(
+            select_users_created_since_sql(),
+            {"date": date}
+        )
+        return row["count"] if row else 0
+
+    async def get_active_users_since(self, date: datetime) -> int:
+        row = await self.db.fetchone(
+            select_users_active_since_sql(),
+            {"date": date}
+        )
+        return row["count"] if row else 0
