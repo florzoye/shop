@@ -182,47 +182,51 @@ async def show_finance_stats(
     products_db: ProductsSQL,
     sales_db: SalesSQL
 ):
-    """Финансовая статистика"""
+    """Финансовая статистика с разделением 'Разное' и остального"""
     try:
-        all_products = await products_db.get_all()
         all_sales = await sales_db.get_all_sales()
-        
-        # Текущая стоимость склада
-        current_stock_value = sum(p.price * p.quantity for p in all_products)
-        
-        # Выручка всего
-        total_revenue = sum(s.price for s in all_sales)
-        
-        # Продажи за последние периоды
-        now = datetime.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start = now - timedelta(days=7)
-        month_start = now - timedelta(days=30)
-        
-        revenue_today = sum(s.price for s in all_sales if s.sale_date >= today_start)
-        revenue_week = sum(s.price for s in all_sales if s.sale_date >= week_start)
-        revenue_month = sum(s.price for s in all_sales if s.sale_date >= month_start)
-        
-        # Ожидаемая прибыль (при продаже всего склада по текущим ценам)
-        expected_profit = current_stock_value
-        
-        # Самая крупная продажа
-        max_sale = max((s.price for s in all_sales), default=0)
-        
+        all_products = await products_db.get_all()
+
+        if not all_sales:
+            await callback.answer("📭 Нет данных о продажах", show_alert=True)
+            return
+
+        # Фильтруем продажи
+        non_misc_sales = [
+            s for s in all_sales
+            if (p := await products_db.get_product_by_brand_and_flavor(s.product_id, s.product_flavor)) 
+               and p.category != "Разное"
+        ]
+        misc_sales = [
+            s for s in all_sales
+            if (p := await products_db.get_product_by_brand_and_flavor(s.product_id, s.product_flavor)) 
+               and p.category == "Разное"
+        ]
+
+        # Выручка
+        revenue_non_misc = sum(s.price for s in non_misc_sales)
+        revenue_misc = sum(s.price for s in misc_sales)
+
+        # Кол-во продаж
+        sales_non_misc = len(non_misc_sales)
+        sales_misc = len(misc_sales)
+
+        # Средний чек
+        avg_check_non_misc = revenue_non_misc / sales_non_misc if sales_non_misc else 0
+        avg_check_misc = revenue_misc / sales_misc if sales_misc else 0
+
         text = (
             f"💰 <b>Финансовая статистика</b>\n\n"
-            f"<b>💵 Выручка:</b>\n"
-            f"├ За сегодня: {revenue_today:,.0f}₽\n"
-            f"├ За неделю: {revenue_week:,.0f}₽\n"
-            f"├ За месяц: {revenue_month:,.0f}₽\n"
-            f"└ Всего: {total_revenue:,.0f}₽\n\n"
-            f"<b>📦 Склад:</b>\n"
-            f"├ Стоимость: {current_stock_value:,.0f}₽\n"
-            f"└ Ожидаемая прибыль: {expected_profit:,.0f}₽\n\n"
-            f"<b>📊 Другое:</b>\n"
-            f"└ Макс. продажа: {max_sale:,.0f}₽"
+            f"<b>Основная касса:</b>\n"
+            f"├ Выручка: {revenue_non_misc:,.0f}₽\n"
+            f"├ Продаж: {sales_non_misc}\n"
+            f"└ Средний чек: {avg_check_non_misc:,.0f}₽\n\n"
+            f"<b>Разное:</b>\n"
+            f"├ Выручка: {revenue_misc:,.0f}₽\n"
+            f"├ Продаж: {sales_misc}\n"
+            f"└ Средний чек: {avg_check_misc:,.0f}₽"
         )
-        
+
         await callback.message.edit_text(
             text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -231,7 +235,7 @@ async def show_finance_stats(
             parse_mode="HTML"
         )
         await callback.answer()
-        
+
     except Exception as e:
         logger.error(f"Error in finance stats: {e}", exc_info=True)
         await callback.answer("❌ Ошибка при загрузке статистики", show_alert=True)
@@ -260,23 +264,21 @@ async def show_charts_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("chart_period:"))
 async def generate_chart(
     callback: CallbackQuery,
-    sales_db: SalesSQL
+    sales_db: SalesSQL,
+    products_db: ProductsSQL
 ):
-    """Генерация графика продаж"""
+    """Графики продаж с разделением 'Разное' и остального"""
     if not MATPLOTLIB_AVAILABLE:
         return
-    
+
     try:
         period = callback.data.split(":")[1]
-        
-        # Получаем продажи
         all_sales = await sales_db.get_all_sales()
-        
+
         if not all_sales:
             await callback.answer("📭 Нет данных о продажах", show_alert=True)
             return
-        
-        # Фильтруем по периоду
+
         now = datetime.now()
         if period == "today":
             start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -287,83 +289,69 @@ async def generate_chart(
         elif period == "month":
             start_date = now - timedelta(days=30)
             title = "Продажи за месяц"
-        else:  # all
+        else:
             start_date = min(s.sale_date for s in all_sales)
             title = "Продажи за всё время"
-        
+
         filtered_sales = [s for s in all_sales if s.sale_date >= start_date]
-        
         if not filtered_sales:
             await callback.answer("📭 Нет продаж за выбранный период", show_alert=True)
             return
-        
-        await callback.message.edit_text(
-            "⏳ Генерирую график...",
-            parse_mode="HTML"
-        )
-        
-        # Создаём график
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-        
-        # График 1: Выручка по дням
-        sales_by_date = defaultdict(float)
-        for sale in filtered_sales:
-            date = sale.sale_date.date()
-            sales_by_date[date] += sale.price
-        
-        dates = sorted(sales_by_date.keys())
-        revenues = [sales_by_date[d] for d in dates]
-        
-        ax1.plot(dates, revenues, marker='o', linewidth=2, markersize=6, color='#2ecc71')
-        ax1.fill_between(dates, revenues, alpha=0.3, color='#2ecc71')
-        ax1.set_title(title, fontsize=14, fontweight='bold')
-        ax1.set_ylabel('Выручка (₽)', fontsize=12)
-        ax1.grid(True, alpha=0.3)
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
-        
-        # График 2: Количество продаж по дням
-        count_by_date = defaultdict(int)
-        for sale in filtered_sales:
-            date = sale.sale_date.date()
-            count_by_date[date] += 1
-        
-        counts = [count_by_date[d] for d in dates]
-        
-        ax2.bar(dates, counts, color='#3498db', alpha=0.7)
-        ax2.set_xlabel('Дата', fontsize=12)
-        ax2.set_ylabel('Количество продаж', fontsize=12)
-        ax2.grid(True, alpha=0.3, axis='y')
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
-        
+
+        await callback.message.edit_text("⏳ Генерирую график...", parse_mode="HTML")
+
+        # Разделяем на две группы
+        non_misc_sales = [
+            s for s in filtered_sales
+            if (p := await products_db.get_product_by_brand_and_flavor(s.product_id, s.product_flavor)) 
+               and p.category != "Разное"
+        ]
+        misc_sales = [
+            s for s in filtered_sales
+            if (p := await products_db.get_product_by_brand_and_flavor(s.product_id, s.product_flavor)) 
+               and p.category == "Разное"
+        ]
+
+        # Группируем по дате
+        def sales_by_date(sales):
+            d = defaultdict(float)
+            for s in sales:
+                date = s.sale_date.date()
+                d[date] += s.price
+            return d
+
+        dates_all = sorted(set(s.sale_date.date() for s in filtered_sales))
+        rev_non_misc = [sales_by_date(non_misc_sales).get(d, 0) for d in dates_all]
+        rev_misc = [sales_by_date(misc_sales).get(d, 0) for d in dates_all]
+
+        # Рисуем график
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(dates_all, rev_non_misc, marker='o', label="Основная касса", color="#2ecc71")
+        ax.plot(dates_all, rev_misc, marker='o', label="Разное", color="#e74c3c")
+        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_ylabel("Выручка (₽)")
+        ax.set_xlabel("Дата")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+
         plt.tight_layout()
-        
-        # Сохраняем в буфер
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
         buf.seek(0)
         plt.close()
-        
-        # Отправляем график
+
         photo = BufferedInputFile(buf.read(), filename="sales_chart.png")
-        
-        stats_text = (
-            f"📈 <b>{title}</b>\n\n"
-            f"💰 Выручка: {sum(revenues):,.0f}₽\n"
-            f"📊 Продаж: {sum(counts)}\n"
-            f"💵 Средний чек: {sum(revenues)/sum(counts):,.0f}₽"
-        )
-        
-        await callback.message.delete()
         await callback.message.answer_photo(
             photo=photo,
-            caption=stats_text,
+            caption=f"📈 <b>{title}</b>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="analytics_charts")]
             ]),
             parse_mode="HTML"
         )
         await callback.answer()
-        
+
     except Exception as e:
         logger.error(f"Error generating chart: {e}", exc_info=True)
         await callback.answer("❌ Ошибка при создании графика", show_alert=True)
