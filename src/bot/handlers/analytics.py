@@ -77,7 +77,9 @@ def create_period_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📅 Месяц", callback_data="chart_period:month"),
             InlineKeyboardButton(text="📅 Всё время", callback_data="chart_period:all")
         ],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="analytics_back")]
+        [
+            InlineKeyboardButton(text="◀️ В аналитику", callback_data="analytics_back")
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -101,14 +103,28 @@ async def analytics_start(message: Message):
 
 @router.callback_query(F.data == "analytics_back")
 async def analytics_back(callback: CallbackQuery):
-    """Возврат в главное меню"""
-    await callback.message.edit_text(
-        "📊 <b>Аналитика и статистика</b>\n\n"
-        "Выберите раздел:",
-        reply_markup=create_analytics_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
+    try:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(
+                "📊 <b>Аналитика и статистика</b>\n\nВыберите раздел:",
+                reply_markup=create_analytics_keyboard(),
+                parse_mode="HTML"
+            )
+        else:
+            # если текст — редактируем
+            await callback.message.edit_text(
+                "📊 <b>Аналитика и статистика</b>\n\nВыберите раздел:",
+                reply_markup=create_analytics_keyboard(),
+                parse_mode="HTML"
+            )
+
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"analytics_back error: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка возврата", show_alert=True)
+
 
 
 @router.callback_query(F.data == "analytics_general")
@@ -267,7 +283,6 @@ async def generate_chart(
     sales_db: SalesSQL,
     products_db: ProductsSQL
 ):
-    """Графики продаж с разделением 'Разное' и остального"""
     if not MATPLOTLIB_AVAILABLE:
         return
 
@@ -276,7 +291,7 @@ async def generate_chart(
         all_sales = await sales_db.get_all_sales()
 
         if not all_sales:
-            await callback.answer("📭 Нет данных о продажах", show_alert=True)
+            await callback.answer("📭 Нет продаж", show_alert=True)
             return
 
         now = datetime.now()
@@ -293,68 +308,78 @@ async def generate_chart(
             start_date = min(s.sale_date for s in all_sales)
             title = "Продажи за всё время"
 
-        filtered_sales = [s for s in all_sales if s.sale_date >= start_date]
-        if not filtered_sales:
-            await callback.answer("📭 Нет продаж за выбранный период", show_alert=True)
+        sales = [s for s in all_sales if s.sale_date >= start_date]
+        if not sales:
+            await callback.answer("📭 Нет данных", show_alert=True)
             return
 
-        await callback.message.edit_text("⏳ Генерирую график...", parse_mode="HTML")
+        # разделение
+        main, misc = [], []
+        for s in sales:
+            product = await products_db.get_product_by_brand_and_flavor(
+                s.product_id, s.product_flavor
+            )
+            if product and product.category == "Разное":
+                misc.append(s)
+            else:
+                main.append(s)
 
-        # Разделяем на две группы
-        non_misc_sales = [
-            s for s in filtered_sales
-            if (p := await products_db.get_product_by_brand_and_flavor(s.product_id, s.product_flavor)) 
-               and p.category != "Разное"
-        ]
-        misc_sales = [
-            s for s in filtered_sales
-            if (p := await products_db.get_product_by_brand_and_flavor(s.product_id, s.product_flavor)) 
-               and p.category == "Разное"
-        ]
-
-        # Группируем по дате
-        def sales_by_date(sales):
+        def group(sales_list):
             d = defaultdict(float)
-            for s in sales:
-                date = s.sale_date.date()
-                d[date] += s.price
+            for s in sales_list:
+                d[s.sale_date.date()] += s.price
             return d
 
-        dates_all = sorted(set(s.sale_date.date() for s in filtered_sales))
-        rev_non_misc = [sales_by_date(non_misc_sales).get(d, 0) for d in dates_all]
-        rev_misc = [sales_by_date(misc_sales).get(d, 0) for d in dates_all]
+        dates = sorted({s.sale_date.date() for s in sales})
+        main_rev = [group(main).get(d, 0) for d in dates]
+        misc_rev = [group(misc).get(d, 0) for d in dates]
 
-        # Рисуем график
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(dates_all, rev_non_misc, marker='o', label="Основная касса", color="#2ecc71")
-        ax.plot(dates_all, rev_misc, marker='o', label="Разное", color="#e74c3c")
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        # --- КРАСИВЫЙ ГРАФИК ---
+        fig, ax = plt.subplots(figsize=(11, 6))
+
+        ax.plot(dates, main_rev, linewidth=3, marker="o", label="Основная касса")
+        ax.plot(dates, misc_rev, linewidth=3, marker="o", label="Разное")
+
+        ax.fill_between(dates, main_rev, alpha=0.15)
+        ax.fill_between(dates, misc_rev, alpha=0.15)
+
+        ax.set_title(title, fontsize=16, fontweight="bold", pad=15)
         ax.set_ylabel("Выручка (₽)")
         ax.set_xlabel("Дата")
-        ax.grid(True, alpha=0.3)
-        ax.legend()
+
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+        ax.tick_params(axis="x", rotation=45)
+
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend(frameon=False)
+
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
 
         plt.tight_layout()
+
         buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.savefig(buf, format="png", dpi=120)
         buf.seek(0)
         plt.close()
 
-        photo = BufferedInputFile(buf.read(), filename="sales_chart.png")
+        photo = BufferedInputFile(buf.read(), "chart.png")
+
+        # 🔥 FIX: удаляем старое сообщение
+        await callback.message.delete()
+
         await callback.message.answer_photo(
             photo=photo,
             caption=f"📈 <b>{title}</b>",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="analytics_charts")]
-            ]),
+            reply_markup=create_period_keyboard(),
             parse_mode="HTML"
         )
         await callback.answer()
 
     except Exception as e:
-        logger.error(f"Error generating chart: {e}", exc_info=True)
-        await callback.answer("❌ Ошибка при создании графика", show_alert=True)
+        logger.error(e, exc_info=True)
+        await callback.answer("❌ Ошибка графика", show_alert=True)
+
 
 
 @router.callback_query(F.data == "analytics_top")

@@ -12,6 +12,32 @@ from db.crud import BrandsSQL, ProductsSQL
 router = Router()
 logger = setup_logger("catalog")
 
+async def replace_message(
+    callback: CallbackQuery,
+    *,
+    text: str | None = None,
+    photo: str | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None
+):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    if photo:
+        await callback.message.answer_photo(
+            photo=photo,
+            caption=text or " ",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.answer(
+            text or " ",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+
 
 def create_main_catalog_keyboard() -> InlineKeyboardMarkup:
     """Главная клавиатура каталога"""
@@ -165,24 +191,24 @@ async def catalog_start(message: Message):
 
 @router.callback_query(F.data == "catalog_back")
 async def catalog_back(callback: CallbackQuery, state: FSMContext):
-    """Возврат в главное меню каталога"""
     await state.clear()
-    await callback.message.edit_text(
-        "🛍 <b>Каталог товаров</b>\n\n"
-        "Выберите способ просмотра:",
-        reply_markup=create_main_catalog_keyboard(),
-        parse_mode="HTML"
+
+    await replace_message(
+        callback,
+        text=(
+            "🛍 <b>Каталог товаров</b>\n\n"
+            "Выберите способ просмотра:"
+        ),
+        reply_markup=create_main_catalog_keyboard()
     )
     await callback.answer()
 
-
 @router.callback_query(F.data == "catalog_categories")
 async def show_categories(callback: CallbackQuery):
-    """Показать категории"""
-    await callback.message.edit_text(
-        "📂 <b>Выберите категорию:</b>",
-        reply_markup=create_categories_keyboard(),
-        parse_mode="HTML"
+    await replace_message(
+        callback,
+        text="📂 <b>Выберите категорию:</b>",
+        reply_markup=create_categories_keyboard()
     )
     await callback.answer()
 
@@ -193,30 +219,30 @@ async def show_category_brands(
     state: FSMContext,
     brands_db: BrandsSQL
 ):
-    """Показать бренды категории"""
     category = callback.data.split(":")[1]
     brands = await brands_db.get_brands_by_category(category)
-    
+
     if not brands:
         await callback.answer(
             f"📭 В категории '{category}' нет брендов",
             show_alert=True
         )
         return
-    
+
     await state.update_data(
         current_category=category,
         view_mode=f"category_brands:{category}"
     )
-    
-    await callback.message.edit_text(
-        f"📂 <b>Категория: {category.capitalize()}</b>\n\n"
-        f"Выберите бренд ({len(brands)} шт):",
-        reply_markup=create_brands_keyboard_catalog(brands, category),
-        parse_mode="HTML"
+
+    await replace_message(
+        callback,
+        text=(
+            f"📂 <b>Категория: {category.capitalize()}</b>\n\n"
+            f"Выберите бренд ({len(brands)} шт):"
+        ),
+        reply_markup=create_brands_keyboard_catalog(brands, category)
     )
     await callback.answer()
-
 
 @router.callback_query(F.data.startswith("catalog_brand:"))
 async def show_brand_products(
@@ -224,52 +250,33 @@ async def show_brand_products(
     state: FSMContext,
     products_db: ProductsSQL
 ):
-    """Показать товары бренда"""
     brand_id = int(callback.data.split(":")[1])
     products = await products_db.get_products_by_brand(brand_id)
-    
+
     if not products:
         await callback.answer("📭 У этого бренда нет товаров", show_alert=True)
         return
-    
-    brand_name = products[0].brand_name if products else "Неизвестно"
-    category = products[0].category.value if products and products[0].category else "N/A"
-    
+
+    brand_name = products[0].brand_name
+    category = products[0].category.value if products[0].category else "N/A"
+
     await state.update_data(
         current_brand_id=brand_id,
         current_brand_name=brand_name,
         view_mode=f"brand_products:{brand_id}"
     )
-    
+
     text = (
         f"🏷 <b>{brand_name}</b>\n"
         f"📂 Категория: {category}\n"
-        f"📊 Всего товаров: {len(products)}\n"
+        f"📊 Всего товаров: {len(products)}"
     )
-    
-    keyboard = create_products_keyboard_catalog(products, brand_id)
-    
-    # Проверяем, есть ли фото в сообщении
-    if callback.message.photo:
-        # Если это сообщение с фото - удаляем его и отправляем новое
-        try:
-            await callback.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting photo message: {e}")
-        
-        await callback.message.answer(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-    else:
-        # Если текстовое сообщение - редактируем
-        await callback.message.edit_text(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-    
+
+    await replace_message(
+        callback,
+        text=text,
+        reply_markup=create_products_keyboard_catalog(products, brand_id)
+    )
     await callback.answer()
 
 
@@ -279,19 +286,17 @@ async def show_product_details(
     state: FSMContext,
     products_db: ProductsSQL
 ):
-    """Показать детали товара"""
     product_id = int(callback.data.split(":")[1])
-    
     products = await products_db.get_all()
+
     product = next((p for p in products if p.id == product_id), None)
-    
     if not product:
         await callback.answer("❌ Товар не найден", show_alert=True)
         return
-    
+
     stock_emoji = "✅" if product.quantity > 0 else "❌"
     stock_text = f"{product.quantity} шт" if product.quantity > 0 else "нет в наличии"
-    
+
     details = (
         f"{stock_emoji} <b>{product.brand_name} - {product.flavor}</b>\n\n"
         f"📂 Категория: {product.category.value if product.category else 'N/A'}\n"
@@ -299,36 +304,22 @@ async def show_product_details(
         f"💰 Цена: {product.price}₽\n"
         f"📊 Остаток: {stock_text}"
     )
-    
-    # Кнопка возврата к товарам бренда
+
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="◀️ К товарам",
             callback_data=f"catalog_brand:{product.brand_id}"
         )]
     ])
-    
-    # Если есть фото - отправляем с фото, иначе просто текст
-    if product.photo_id:
-        try:
-            await callback.message.answer_photo(
-                photo=product.photo_id,
-                caption=details,
-                reply_markup=back_keyboard,
-                parse_mode="HTML"
-            )
-            await callback.answer()
-        except Exception as e:
-            logger.error(f"Error sending photo: {e}")
-            await callback.answer(details, show_alert=True)
-    else:
-        # Без фото - отправляем сообщение с кнопкой
-        await callback.message.answer(
-            details,
-            reply_markup=back_keyboard,
-            parse_mode="HTML"
-        )
-        await callback.answer()
+
+    await replace_message(
+        callback,
+        text=details,
+        photo=product.photo_id,
+        reply_markup=back_keyboard
+    )
+    await callback.answer()
+
 
 
 @router.callback_query(F.data == "catalog_back_to_brands")
