@@ -4,7 +4,7 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 
-from db.crud import BrandsSQL, ProductsSQL, SalesSQL, UsersSQL
+from db.crud import BrandsSQL, ProductsSQL, SalesSQL
 from db.manager import AsyncDatabaseManager
 
 from src.bot.config import bot_config
@@ -13,10 +13,12 @@ from src.bot.handlers.sell_products import router as sell_router
 from src.bot.handlers.delete_product import router as delete_router
 from src.bot.handlers.manage_photo import router as photo_router
 from src.bot.handlers.analytics import router as analytics_router
+from src.bot.handlers.backup_handler import router as backup_router
 from src.bot.handlers.cancel import router as cancel_router
 from src.bot.handlers.catalog import router as catalog_router
 from src.bot.handlers.start import router as start_router
 from src.bot.middleware import DatabaseMiddleware
+from src.bot.utils.backup import scheduled_backup
 
 
 # Настройка логирования
@@ -36,6 +38,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="start", description="🏠 Главное меню"),
         BotCommand(command="catalog", description="🛍 Каталог товаров"),
         BotCommand(command="analytics", description="📊 Аналитика"),
+        BotCommand(command="backup", description="💾 Бэкап БД"),
         BotCommand(command="add_products", description="📦 Добавить товары"),
         BotCommand(command="sell", description="💰 Продать товар"),
         BotCommand(command="delete", description="🗑 Удалить товар"),
@@ -45,7 +48,7 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 
-async def init_database() -> tuple[AsyncDatabaseManager, BrandsSQL, ProductsSQL, SalesSQL, UsersSQL]:
+async def init_database() -> tuple[AsyncDatabaseManager, BrandsSQL, ProductsSQL, SalesSQL]:
     """Инициализация базы данных"""
     try:
         # Используем переменную окружения для пути к БД или дефолтное значение
@@ -58,20 +61,18 @@ async def init_database() -> tuple[AsyncDatabaseManager, BrandsSQL, ProductsSQL,
         brands_db = BrandsSQL(manager)
         products_db = ProductsSQL(manager)
         sales_db = SalesSQL(manager)
-        users_db = UsersSQL(manager)
         
         # Создаём таблицы (порядок важен из-за FK!)
         brands_created = await brands_db.create_tables()
         products_created = await products_db.create_tables()
         sales_created = await sales_db.create_tables()
-        users_created = await users_db.create_tables()
         
         if brands_created and products_created and sales_created:
             logger.info("✅ Database tables created successfully")
         else:
             logger.error("❌ Failed to create database tables")
             
-        return manager, brands_db, products_db, sales_db, users_db
+        return manager, brands_db, products_db, sales_db
     except Exception as e:
         logger.error(f"❌ Database initialization error: {e}", exc_info=True)
         raise
@@ -116,13 +117,12 @@ async def start_bot():
     """Запуск бота"""
     try:
         # Инициализируем БД
-        manager, brands_db, products_db, sales_db, users_db  = await init_database()
+        manager, brands_db, products_db, sales_db = await init_database()
         
         # Передаём БД в хендлеры через middleware
         dp["brands_db"] = brands_db
         dp["products_db"] = products_db
         dp["sales_db"] = sales_db
-        dp["users_db"] = users_db
         dp["db_manager"] = manager
         
         # Подключаем middleware
@@ -134,6 +134,7 @@ async def start_bot():
         dp.include_router(cancel_router)     # Вторым - отмена
         dp.include_router(catalog_router)    # Каталог
         dp.include_router(analytics_router)  # Аналитика
+        dp.include_router(backup_router)     # Бэкапы
         dp.include_router(add_products_router)
         dp.include_router(sell_router)
         dp.include_router(delete_router)
@@ -143,6 +144,12 @@ async def start_bot():
         await on_startup()
         
         logger.info("🎉 Bot started successfully! Polling...")
+        
+        # Запускаем планировщик бэкапов в фоне
+        db_path = os.getenv('DATABASE_PATH', 'products.db')
+        asyncio.create_task(scheduled_backup(bot, db_path))
+        logger.info("💾 Backup scheduler started (every 12 hours)")
+        
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
         
     except Exception as e:

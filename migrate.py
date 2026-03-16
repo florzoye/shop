@@ -1,70 +1,129 @@
 """
-Миграция: Добавление колонки photo_id в таблицу products
+Скрипт миграции данных из SQLite в PostgreSQL
 """
 import asyncio
 import aiosqlite
+import asyncpg
 import os
+from dotenv import load_dotenv
 
 
-async def migrate_add_photo_column():
-    """Добавляет колонку photo_id в таблицу products"""
+load_dotenv()
+
+
+async def migrate_data():
+    """Миграция данных из SQLite в PostgreSQL"""
     
-    db_path = os.getenv('DATABASE_PATH', 'products.db')
+    sqlite_path = "products.db"
+    postgres_url = os.getenv("DATABASE_URL")
     
-    if not os.path.exists(db_path):
-        print(f"❌ Файл {db_path} не найден")
+    if not postgres_url:
+        print("❌ DATABASE_URL not found in environment")
         return
     
-    print(f"📦 Работаю с базой: {db_path}")
+    if not os.path.exists(sqlite_path):
+        print(f"❌ SQLite database not found: {sqlite_path}")
+        return
     
-    async with aiosqlite.connect(db_path) as db:
-        # Проверяем существование таблицы
-        cursor = await db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='products'"
-        )
-        table_exists = await cursor.fetchone()
+    print("🔄 Starting migration from SQLite to PostgreSQL...")
+    print(f"📂 Source: {sqlite_path}")
+    print(f"🎯 Target: {postgres_url.split('@')[1] if '@' in postgres_url else postgres_url}")
+    
+    # Подключение к БД
+    sqlite_conn = await aiosqlite.connect(sqlite_path)
+    postgres_conn = await asyncpg.connect(postgres_url)
+    
+    try:
+        # Миграция brands
+        print("\n📦 Migrating brands...")
+        cursor = await sqlite_conn.execute("SELECT id, name, category FROM brands")
+        brands = await cursor.fetchall()
         
-        if not table_exists:
-            print("❌ Таблица products не найдена")
-            return
+        brand_id_map = {}  # Старый ID -> Новый ID
         
-        # Проверяем структуру таблицы
-        cursor = await db.execute("PRAGMA table_info(products)")
-        columns = await cursor.fetchall()
-        column_names = [col[1] for col in columns]
-        
-        print(f"📊 Текущие колонки: {', '.join(column_names)}")
-        
-        # Проверяем есть ли уже photo_id
-        if 'photo_id' in column_names:
-            print("✅ Колонка photo_id уже существует!")
-            return
-        
-        print("🔄 Добавляю колонку photo_id...")
-        
-        try:
-            # Добавляем колонку
-            await db.execute(
-                "ALTER TABLE products ADD COLUMN photo_id TEXT"
+        for old_id, name, category in brands:
+            # Вставляем в PostgreSQL
+            new_id = await postgres_conn.fetchval(
+                "INSERT INTO brands (name, category) VALUES ($1, $2) "
+                "ON CONFLICT (name, category) DO UPDATE SET name=EXCLUDED.name "
+                "RETURNING id",
+                name, category
             )
-            await db.commit()
+            brand_id_map[old_id] = new_id
+            print(f"  ✓ {name} ({category}): {old_id} -> {new_id}")
+        
+        print(f"✅ Brands migrated: {len(brands)}")
+        
+        # Миграция products
+        print("\n📦 Migrating products...")
+        cursor = await sqlite_conn.execute(
+            "SELECT id, brand_id, flavor, quantity, price, photo_id FROM products"
+        )
+        products = await cursor.fetchall()
+        
+        product_id_map = {}
+        
+        for old_id, old_brand_id, flavor, quantity, price, photo_id in products:
+            new_brand_id = brand_id_map.get(old_brand_id)
+            if not new_brand_id:
+                print(f"  ⚠️ Brand not found for product {flavor}, skipping")
+                continue
             
-            print("✅ Колонка photo_id успешно добавлена!")
+            new_id = await postgres_conn.fetchval(
+                "INSERT INTO products (brand_id, flavor, quantity, price, photo_id) "
+                "VALUES ($1, $2, $3, $4, $5) RETURNING id",
+                new_brand_id, flavor, quantity, float(price), photo_id
+            )
+            product_id_map[old_id] = new_id
+            print(f"  ✓ {flavor}: {old_id} -> {new_id}")
+        
+        print(f"✅ Products migrated: {len(products)}")
+        
+        # Миграция sales
+        print("\n📦 Migrating sales...")
+        cursor = await sqlite_conn.execute(
+            "SELECT product_id, admin_id, quantity, price, sale_date FROM sales"
+        )
+        sales = await cursor.fetchall()
+        
+        migrated_sales = 0
+        for product_id, admin_id, quantity, price, sale_date in sales:
+            new_product_id = product_id_map.get(product_id)
+            if not new_product_id:
+                print(f"  ⚠️ Product not found for sale, skipping")
+                continue
             
-            # Проверяем результат
-            cursor = await db.execute("PRAGMA table_info(products)")
-            columns = await cursor.fetchall()
-            column_names = [col[1] for col in columns]
-            print(f"📊 Новые колонки: {', '.join(column_names)}")
-            
-        except Exception as e:
-            print(f"❌ Ошибка при добавлении колонки: {e}")
-            return
+            await postgres_conn.execute(
+                "INSERT INTO sales (product_id, admin_id, quantity, price, sale_date) "
+                "VALUES ($1, $2, $3, $4, $5)",
+                new_product_id, admin_id, quantity, float(price), sale_date
+            )
+            migrated_sales += 1
+        
+        print(f"✅ Sales migrated: {migrated_sales}")
+        
+        # Статистика
+        print("\n" + "="*50)
+        print("📊 Migration Summary:")
+        print(f"  Brands:   {len(brands)}")
+        print(f"  Products: {len(products)}")
+        print(f"  Sales:    {migrated_sales}")
+        print("="*50)
+        print("\n✅ Migration completed successfully!")
+        print("\n💡 Next steps:")
+        print("  1. Verify data in PostgreSQL")
+        print("  2. Update .env with DATABASE_URL")
+        print("  3. Restart the bot")
+        print(f"  4. Backup SQLite: mv {sqlite_path} {sqlite_path}.backup")
+        
+    except Exception as e:
+        print(f"\n❌ Migration failed: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        await sqlite_conn.close()
+        await postgres_conn.close()
 
 
 if __name__ == "__main__":
-    print("🚀 Миграция: добавление photo_id")
-    print("=" * 50)
-    asyncio.run(migrate_add_photo_column())
-    print("=" * 50)
-    print("✅ Готово! Перезапустите бота.")
+    asyncio.run(migrate_data())
